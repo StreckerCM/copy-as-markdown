@@ -5,6 +5,7 @@
 // Keyboard command IDs registered in manifest
 export const KeyboardCommandIds = {
   SelectionAsMarkdown: 'selection-as-markdown',
+  ElementAsMarkdown: 'element-as-markdown',
   CurrentTabLink: 'current-tab-link',
   AllTabsLinkAsList: 'all-tabs-link-as-list',
   AllTabsLinkAsTaskList: 'all-tabs-link-as-task-list',
@@ -29,6 +30,7 @@ export const ContextMenuIds = {
   Link: 'link',
   Image: 'image',
   SelectionAsMarkdown: 'selection-as-markdown',
+  ElementAsMarkdown: 'element-as-markdown',
   AllTabsLinkAsList: 'all-tabs-link-as-list',
   AllTabsLinkAsTaskList: 'all-tabs-link-as-task-list',
   AllTabsTitleAsList: 'all-tabs-title-as-list',

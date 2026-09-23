@@ -19,6 +19,8 @@ import type { ClipboardService } from './services/clipboard-service.js';
 import { createOffscreenClipboardService } from './services/offscreen-clipboard-service.js';
 import { LinkExportService } from './services/link-export-service.js';
 import { createBrowserSelectionConverterService } from './services/selection-converter-service.js';
+import { createBrowserElementPickerService } from './services/element-picker-service.js';
+import { mustGetCurrentTab } from './services/browser-utils.js';
 import { createBrowserOffscreenDocumentService } from './services/offscreen-document-service.js';
 import {
   createEventPageMarkdownConverter,
@@ -29,6 +31,7 @@ import { createBrowserPendingPopupFeedbackService } from './services/pending-pop
 import { createKeyboardBrowserCommandHandler } from './handlers/keyboard-command-handler.js';
 import { createBrowserContextMenuHandler } from './handlers/context-menu-handler.js';
 import { createBrowserRuntimeMessageHandler } from './handlers/runtime-message-handler.js';
+import { ContextMenuIds, KeyboardCommandIds } from './contracts/commands.js';
 import type { KeyboardCommandId } from './contracts/commands.js';
 import type { PendingPopupFeedbackCode, RuntimeMessage } from './contracts/messages.js';
 
@@ -83,6 +86,8 @@ const selectionConverterService = createBrowserSelectionConverterService(
   },
   markdownConverter,
 );
+
+const elementPickerService = createBrowserElementPickerService();
 
 const handlerServices = {
   linkExportService,
@@ -158,6 +163,12 @@ browser.storage.sync.onChanged.addListener(async (changes) => {
 
 browser.contextMenus.onClicked.addListener(async (info, tab) => {
   try {
+    // The picker copies later, via the copy-picked-element message.
+    if (info.menuItemId === ContextMenuIds.ElementAsMarkdown) {
+      await elementPickerService.start(await mustGetCurrentTab(browser.tabs, tab), info.frameId);
+      return true;
+    }
+
     const text = await contextMenuHandler.handleMenuClick(info, tab);
     const didCopy = await clipboardService.copy(text);
     if (didCopy) {
@@ -177,6 +188,12 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
 // listen to keyboard shortcuts
 browser.commands.onCommand.addListener(async (command: string, tab?: browser.tabs.Tab) => {
   try {
+    // The picker copies later, via the copy-picked-element message.
+    if (command === KeyboardCommandIds.ElementAsMarkdown) {
+      await elementPickerService.start(await mustGetCurrentTab(browser.tabs, tab));
+      return true;
+    }
+
     const text = await keyboardCommandHandler.handleCommand(command as KeyboardCommandId, tab);
     const didCopy = await clipboardService.copy(text);
     if (didCopy) {
@@ -195,7 +212,7 @@ browser.commands.onCommand.addListener(async (command: string, tab?: browser.tab
 
 // listen to messages from popup
 // NOTE: async function will not work here
-browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const runtimeMessage = message as RuntimeMessage;
   // e2e readiness probe: reaching this handler already proves the module body
   // ran (onMessage is registered in the same synchronous pass as onCommand /
@@ -250,6 +267,31 @@ browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({ ok: true, text: null, copied: didCopy });
       })
       .catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  // The element picker selected the picked element in the sender's frame; copy it
+  // exactly like Copy Selection as Markdown from that frame.
+  if (runtimeMessage.topic === 'copy-picked-element') {
+    (async () => {
+      if (!sender.tab) {
+        throw new Error('copy-picked-element must come from a tab');
+      }
+      const text = await selectionConverterService.convertSelectionToMarkdown(sender.tab, sender.frameId ?? 0);
+      const didCopy = await clipboardService.copy(text);
+      if (didCopy) {
+        await clearPendingPopupFeedback();
+        await badgeService.showSuccess();
+      } else {
+        await setPendingPopupFeedback(EMPTY_RESULT_FEEDBACK);
+      }
+    })()
+      .then(() => sendResponse({ ok: true, text: null }))
+      .catch(async (error) => {
+        console.error(error);
+        await badgeService.showError();
+        sendResponse({ ok: false, error: error.message });
+      });
     return true;
   }
 

@@ -150,6 +150,16 @@ describe('contextMenuService', () => {
           title: 'Copy Selection as Markdown',
         }),
       );
+
+      // Shown on pages too, not just selections: Firefox doesn't report a
+      // selection that ends inside shadow DOM as the "selection" context.
+      expect(createMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'element-as-markdown',
+          title: 'Copy Element as Markdown…',
+          contexts: ['page', 'selection'],
+        }),
+      );
     });
 
     it('should create custom format menus for single links', async () => {

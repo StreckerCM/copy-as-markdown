@@ -29,6 +29,14 @@ export interface CopyToClipboardMessage {
   params: { text: string };
 }
 
+// Sent by the element picker content script once the user clicks an element. The
+// picker has already selected that element, so the background copies the sender
+// frame's selection.
+export interface CopyPickedElementMessage {
+  topic: 'copy-picked-element';
+  params: Record<string, never>;
+}
+
 export interface CheckMockClipboardMessage {
   topic: 'check-mock-clipboard';
   params: Record<string, never>;
@@ -58,6 +66,7 @@ export type RuntimeMessage
     | ExportCurrentTabMessage
     | ExportTabsMessage
     | CopyToClipboardMessage
+    | CopyPickedElementMessage
     | CheckMockClipboardMessage
     | SetMockClipboardMessage
     | ConsumePendingPopupFeedbackMessage
