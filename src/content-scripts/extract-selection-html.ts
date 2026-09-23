@@ -28,10 +28,152 @@ export function extractSelectionHtml(onlyIfFocused: boolean): string {
     return '';
   }
 
+  // Range.cloneContents() does not copy shadow roots, so web components that render
+  // their content in shadow DOM (e.g. Salesforce's <dx-code-block>) clone as empty
+  // tags. Rebuild each such host from the content it actually renders: the shadow
+  // tree, with <slot>s filled from the host's (range-clipped) light children.
+  const isRendered = (el: Element): boolean => {
+    if (['STYLE', 'SCRIPT', 'TEMPLATE', 'BUTTON', 'svg'].includes(el.nodeName)) {
+      return false;
+    }
+    const style = getComputedStyle(el);
+    // Line-number gutters and similar chrome are marked user-select: none.
+    return style.display !== 'none' && style.visibility !== 'hidden' && style.userSelect !== 'none';
+  };
+
+  const composedChildren = (
+    root: ShadowRoot,
+    lightChildren: (slot: HTMLSlotElement) => Node[],
+  ): Node[] => {
+    const cloneNode = (node: Node): Node[] => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        return [node.cloneNode()];
+      }
+      if (!(node instanceof Element) || !isRendered(node)) {
+        return [];
+      }
+      if (node instanceof HTMLSlotElement) {
+        const assigned = lightChildren(node);
+        return assigned.length > 0 ? assigned : Array.from(node.childNodes).flatMap(cloneNode);
+      }
+      const copy = node.cloneNode(false) as Element;
+      const children = node.shadowRoot
+        ? composedChildren(node.shadowRoot, slot => slot.assignedNodes().flatMap(cloneNode))
+        : Array.from(node.childNodes).flatMap(cloneNode);
+      copy.append(...children);
+      return [copy];
+    };
+    return Array.from(root.childNodes).flatMap(cloneNode);
+  };
+
+  // A selection that crosses a shadow boundary (e.g. ends inside a code block) cannot
+  // be a live Range, so getRangeAt() returns it collapsed. getComposedRanges() keeps
+  // the real endpoints; lift each endpoint out of nested shadow trees until both share
+  // a tree, which pulls in whole shadow hosts that are rebuilt below.
+  const selectedRanges = (): Range[] => {
+    const shadowRoots: ShadowRoot[] = [];
+    const collect = (root: Document | ShadowRoot): void => {
+      root.querySelectorAll('*').forEach((el) => {
+        if (el.shadowRoot) {
+          shadowRoots.push(el.shadowRoot);
+          collect(el.shadowRoot);
+        }
+      });
+    };
+
+    let composed: StaticRange[];
+    try {
+      collect(document);
+      // Not in TypeScript's DOM lib yet. Browsers without it (or with the older
+      // variadic signature) throw here and fall back to plain getRangeAt().
+      composed = (sel as Selection & {
+        getComposedRanges: (options: { shadowRoots: ShadowRoot[] }) => StaticRange[];
+      }).getComposedRanges({ shadowRoots });
+    } catch {
+      return Array.from({ length: sel.rangeCount }, (_, i) => sel.getRangeAt(i));
+    }
+
+    const treesOf = (node: Node): Node[] => {
+      const trees = [node.getRootNode()];
+      for (let root = trees[0]; root instanceof ShadowRoot; root = root.host.getRootNode()) {
+        trees.push(root.host.getRootNode());
+      }
+      return trees;
+    };
+    const lift = (node: Node, offset: number, tree: Node, after: boolean): [Node, number] => {
+      while (node.getRootNode() !== tree) {
+        const host = (node.getRootNode() as ShadowRoot).host;
+        node = host.parentNode!;
+        offset = Array.from(node.childNodes).indexOf(host) + (after ? 1 : 0);
+      }
+      return [node, offset];
+    };
+
+    return composed.map((staticRange) => {
+      const endTrees = treesOf(staticRange.endContainer);
+      const tree = treesOf(staticRange.startContainer).find(root => endTrees.includes(root))!;
+      const range = document.createRange();
+      range.setStart(...lift(staticRange.startContainer, staticRange.startOffset, tree, false));
+      range.setEnd(...lift(staticRange.endContainer, staticRange.endOffset, tree, true));
+      return range;
+    });
+  };
+
   const container = document.createElement('div');
-  for (let i = 0, len = sel.rangeCount; i < len; i += 1) {
-    container.appendChild(sel.getRangeAt(i).cloneContents());
+  for (const range of selectedRanges()) {
+    const fragment = range.cloneContents();
+
+    // cloneContents() copies exactly the elements under the common ancestor that
+    // intersect the range, in tree order, so the originals and clones line up.
+    const ancestor = range.commonAncestorContainer;
+    const originals = ancestor instanceof Element || ancestor instanceof DocumentFragment
+      ? Array.from(ancestor.querySelectorAll('*')).filter(el => range.intersectsNode(el))
+      : [];
+    const originalHosts = originals.filter(el => el.shadowRoot);
+    if (originalHosts.length > 0) {
+      const clones = Array.from(fragment.querySelectorAll('*'));
+      if (originals.length === clones.length) {
+        const cloneOf = new Map(originals.map((el, index) => [el, clones[index]!]));
+        originalHosts.forEach((host) => {
+          const clone = cloneOf.get(host)!;
+          const light = Array.from(clone.childNodes);
+          clone.replaceChildren(...composedChildren(host.shadowRoot!, (slot) => {
+            const name = slot.name;
+            return light.filter(node => (
+              node instanceof Element ? node.getAttribute('slot') ?? '' : ''
+            ) === name);
+          }));
+        });
+      }
+    }
+
+    container.appendChild(fragment);
   }
+
+  // Render callout/admonition boxes ("Note", "Warning", ...) as blockquotes. Only
+  // the outermost match converts, so nested "-callout" parts are not re-wrapped.
+  const isCallout = (el: Element): boolean => el.getAttribute('role') === 'note'
+    || Array.from(el.classList).some(c => /^(?:.+-)?(?:callout|admonition)$/.test(c));
+  const quotes: Element[] = [];
+  Array.from(container.querySelectorAll('*')).forEach((el) => {
+    if (!isCallout(el) || quotes.some(quote => quote.contains(el))) {
+      return;
+    }
+    const title = Array.from(el.querySelectorAll('*')).find(
+      t => Array.from(t.classList).some(c => /title/.test(c)),
+    );
+    if (title && title.textContent?.trim()) {
+      const strong = document.createElement('strong');
+      strong.textContent = title.textContent.trim();
+      const p = document.createElement('p');
+      p.appendChild(strong);
+      title.replaceWith(p);
+    }
+    const quote = document.createElement('blockquote');
+    quote.append(...Array.from(el.childNodes));
+    el.replaceWith(quote);
+    quotes.push(quote);
+  });
 
   // Fix <a href> so that they are absolute URLs
   container.querySelectorAll('a').forEach((value) => {

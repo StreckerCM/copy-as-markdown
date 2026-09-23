@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Shadow DOM selection</title>
+</head>
+<body>
+  <!--
+    Mirrors Salesforce developer docs: the article is rendered in an open shadow root,
+    each code block is a <doc-code-block> whose <pre> lives in its own shadow root
+    (with a toolbar and user-select: none line numbers), and notes are <doc-callout>
+    elements whose "Note" title is in shadow DOM while the body is slotted light DOM.
+  -->
+  <doc-article></doc-article>
+  <script>
+    customElements.define('doc-code-block', class extends HTMLElement {
+      constructor() {
+        super();
+        this.attachShadow({ mode: 'open' }).innerHTML = `
+          <div class="toolbar"><button>Copy</button></div>
+          <pre class="shiki"><code><span class="n" style="user-select: none">1</span><span class="line">type A {</span>
+<span class="n" style="user-select: none">2</span><span class="line">}</span></code></pre>`;
+      }
+    });
+    customElements.define('doc-callout', class extends HTMLElement {
+      constructor() {
+        super();
+        this.attachShadow({ mode: 'open' }).innerHTML = `
+          <div class="dx-callout">
+            <p class="dx-callout-title">Note</p>
+            <span class="dx-callout-body"><slot></slot></span>
+          </div>`;
+      }
+    });
+    customElements.define('doc-article', class extends HTMLElement {
+      constructor() {
+        super();
+        this.attachShadow({ mode: 'open' }).innerHTML = `
+          <div id="article">
+            <h1>Title</h1>
+            <p>Intro</p>
+            <div class="codeSection"><doc-code-block></doc-code-block></div>
+            <doc-callout><p>Callout body</p></doc-callout>
+            <p id="after">After</p>
+          </div>`;
+      }
+    });
+  </script>
+</body>
+</html>
