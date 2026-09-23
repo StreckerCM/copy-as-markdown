@@ -119,6 +119,21 @@ describe('extractSelectionHtml with shadow DOM', () => {
     expect(toMarkdown()).toBe('# Title\n\nIntro\n\n```\ntype A {\n}\n```');
   });
 
+  it('fills slots inside the selection with the content assigned to them', () => {
+    // Like Salesforce's <doc-content-layout>: the article is slotted into a wrapper
+    // in the layout's shadow tree, next to a feedback widget.
+    const layout = document.createElement('div');
+    layout.innerHTML = '<article><h2>Article</h2><test-code-block></test-code-block></article>';
+    document.body.appendChild(layout);
+    const root = layout.attachShadow({ mode: 'open' });
+    root.innerHTML = '<nav>Sidebar</nav><div id="body"><slot></slot><p>Feedback</p></div>';
+    const range = document.createRange();
+    range.selectNode(root.querySelector('#body')!);
+    select(range);
+
+    expect(toMarkdown()).toBe('## Article\n\n```\ntype A {\n}\n```\n\nFeedback');
+  });
+
   it('flattens nested shadow hosts inside a light-DOM selection', () => {
     document.body.innerHTML = '<div id="s"><p>Before</p><test-code-block></test-code-block></div>';
     const range = document.createRange();
