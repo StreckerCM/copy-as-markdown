@@ -48,5 +48,9 @@ export function htmlToMarkdown(html: string, options: TurndownOptions): string {
     .remove('style');
   turndownService.use(tables);
   turndownService.addRule('singleParagraphInListItem', singleParagraphInListItemRule);
-  return turndownService.turndown(html).replace(/\n+$/, '');
+  return turndownService.turndown(html)
+    // U+2028/U+2029 render as whitespace in HTML, but editors treat them as line
+    // breaks (VS Code prompts to remove "unusual line terminators").
+    .replace(/[\u2028\u2029]/g, ' ')
+    .replace(/\n+$/, '');
 }

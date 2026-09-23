@@ -22,6 +22,11 @@ describe('htmlToMarkdown', () => {
       .toBe('-   a\n    \n    b');
   });
 
+  it('replaces Unicode line and paragraph separators with spaces', () => {
+    expect(htmlToMarkdown('<p>a\u2028b\u2029c</p><pre><code>x;\u2028\ny;</code></pre>', OPTS))
+      .toBe('a b c\n\n    x; \n    y;');
+  });
+
   it('removes script and style elements', () => {
     expect(htmlToMarkdown('<p>keep</p><script>bad()</script><style>.x{}</style>', OPTS))
       .toBe('keep');
