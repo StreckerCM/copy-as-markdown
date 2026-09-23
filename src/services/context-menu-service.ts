@@ -194,6 +194,11 @@ function createImageAndSelectionMenus(): browser.menus._CreateCreateProperties[]
     title: 'Copy Selection as Markdown',
     type: 'normal',
     contexts: ['selection'],
+  }, {
+    id: ContextMenuIds.ElementAsMarkdown,
+    title: 'Copy Element as Markdown…',
+    type: 'normal',
+    contexts: ['page', 'selection'],
   }];
 }
 

@@ -38,6 +38,9 @@
     "selection-as-markdown": {
       "description": "Copy Selection as Markdown"
     },
+    "element-as-markdown": {
+      "description": "Copy Element as Markdown (pick on page)"
+    },
     "current-tab-link": {
       "description": "current tab: [title](url)"
     },
