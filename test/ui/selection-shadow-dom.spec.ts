@@ -105,6 +105,20 @@ describe('extractSelectionHtml with shadow DOM', () => {
     expect(toMarkdown()).toBe('> **Note**\n> \n> body\n\nAft');
   });
 
+  it('includes the whole code block when the selection ends inside its shadow root', () => {
+    const root = mountArticle();
+    const code = root.querySelector('test-code-block')!.shadowRoot!.querySelector('code')!;
+    const lastLine = code.querySelectorAll('.line')[1]!.firstChild!;
+    window.getSelection()!.setBaseAndExtent(
+      root.querySelector('h1')!.firstChild!,
+      0,
+      lastLine,
+      1,
+    );
+
+    expect(toMarkdown()).toBe('# Title\n\nIntro\n\n```\ntype A {\n}\n```');
+  });
+
   it('flattens nested shadow hosts inside a light-DOM selection', () => {
     document.body.innerHTML = '<div id="s"><p>Before</p><test-code-block></test-code-block></div>';
     const range = document.createRange();

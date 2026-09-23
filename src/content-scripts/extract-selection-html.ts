@@ -66,9 +66,61 @@ export function extractSelectionHtml(onlyIfFocused: boolean): string {
     return Array.from(root.childNodes).flatMap(cloneNode);
   };
 
+  // A selection that crosses a shadow boundary (e.g. ends inside a code block) cannot
+  // be a live Range, so getRangeAt() returns it collapsed. getComposedRanges() keeps
+  // the real endpoints; lift each endpoint out of nested shadow trees until both share
+  // a tree, which pulls in whole shadow hosts that are rebuilt below.
+  const selectedRanges = (): Range[] => {
+    const shadowRoots: ShadowRoot[] = [];
+    const collect = (root: Document | ShadowRoot): void => {
+      root.querySelectorAll('*').forEach((el) => {
+        if (el.shadowRoot) {
+          shadowRoots.push(el.shadowRoot);
+          collect(el.shadowRoot);
+        }
+      });
+    };
+
+    let composed: StaticRange[];
+    try {
+      collect(document);
+      // Not in TypeScript's DOM lib yet. Browsers without it (or with the older
+      // variadic signature) throw here and fall back to plain getRangeAt().
+      composed = (sel as Selection & {
+        getComposedRanges: (options: { shadowRoots: ShadowRoot[] }) => StaticRange[];
+      }).getComposedRanges({ shadowRoots });
+    } catch {
+      return Array.from({ length: sel.rangeCount }, (_, i) => sel.getRangeAt(i));
+    }
+
+    const treesOf = (node: Node): Node[] => {
+      const trees = [node.getRootNode()];
+      for (let root = trees[0]; root instanceof ShadowRoot; root = root.host.getRootNode()) {
+        trees.push(root.host.getRootNode());
+      }
+      return trees;
+    };
+    const lift = (node: Node, offset: number, tree: Node, after: boolean): [Node, number] => {
+      while (node.getRootNode() !== tree) {
+        const host = (node.getRootNode() as ShadowRoot).host;
+        node = host.parentNode!;
+        offset = Array.from(node.childNodes).indexOf(host) + (after ? 1 : 0);
+      }
+      return [node, offset];
+    };
+
+    return composed.map((staticRange) => {
+      const endTrees = treesOf(staticRange.endContainer);
+      const tree = treesOf(staticRange.startContainer).find(root => endTrees.includes(root))!;
+      const range = document.createRange();
+      range.setStart(...lift(staticRange.startContainer, staticRange.startOffset, tree, false));
+      range.setEnd(...lift(staticRange.endContainer, staticRange.endOffset, tree, true));
+      return range;
+    });
+  };
+
   const container = document.createElement('div');
-  for (let i = 0, len = sel.rangeCount; i < len; i += 1) {
-    const range = sel.getRangeAt(i);
+  for (const range of selectedRanges()) {
     const fragment = range.cloneContents();
 
     // cloneContents() copies exactly the elements under the common ancestor that
