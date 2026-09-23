@@ -41,8 +41,10 @@ export function extractSelectionHtml(onlyIfFocused: boolean): string {
     return style.display !== 'none' && style.visibility !== 'hidden' && style.userSelect !== 'none';
   };
 
-  const composedChildren = (
-    root: ShadowRoot,
+  // Clones `nodes` as rendered: shadow hosts are expanded and <slot>s are filled by
+  // `lightChildren` (the host's light children assigned to that slot).
+  const composedClone = (
+    nodes: Node[],
     lightChildren: (slot: HTMLSlotElement) => Node[],
   ): Node[] => {
     const cloneNode = (node: Node): Node[] => {
@@ -58,13 +60,16 @@ export function extractSelectionHtml(onlyIfFocused: boolean): string {
       }
       const copy = node.cloneNode(false) as Element;
       const children = node.shadowRoot
-        ? composedChildren(node.shadowRoot, slot => slot.assignedNodes().flatMap(cloneNode))
+        ? composedClone(Array.from(node.shadowRoot.childNodes), slot => slot.assignedNodes().flatMap(cloneNode))
         : Array.from(node.childNodes).flatMap(cloneNode);
       copy.append(...children);
       return [copy];
     };
-    return Array.from(root.childNodes).flatMap(cloneNode);
+    return nodes.flatMap(cloneNode);
   };
+
+  // Everything a slot renders, when the slot itself is inside the selection.
+  const assignedClone = (slot: HTMLSlotElement): Node[] => composedClone(slot.assignedNodes(), assignedClone);
 
   // A selection that crosses a shadow boundary (e.g. ends inside a code block) cannot
   // be a live Range, so getRangeAt() returns it collapsed. getComposedRanges() keeps
@@ -130,19 +135,27 @@ export function extractSelectionHtml(onlyIfFocused: boolean): string {
       ? Array.from(ancestor.querySelectorAll('*')).filter(el => range.intersectsNode(el))
       : [];
     const originalHosts = originals.filter(el => el.shadowRoot);
-    if (originalHosts.length > 0) {
+    // A selection inside a shadow tree can contain the tree's own <slot>s (e.g. a
+    // layout wrapper around the slotted article). cloneContents() copies them empty.
+    const originalSlots = originals.filter(
+      (el): el is HTMLSlotElement => el instanceof HTMLSlotElement && el.assignedNodes().length > 0,
+    );
+    if (originalHosts.length > 0 || originalSlots.length > 0) {
       const clones = Array.from(fragment.querySelectorAll('*'));
       if (originals.length === clones.length) {
         const cloneOf = new Map(originals.map((el, index) => [el, clones[index]!]));
         originalHosts.forEach((host) => {
           const clone = cloneOf.get(host)!;
           const light = Array.from(clone.childNodes);
-          clone.replaceChildren(...composedChildren(host.shadowRoot!, (slot) => {
+          clone.replaceChildren(...composedClone(Array.from(host.shadowRoot!.childNodes), (slot) => {
             const name = slot.name;
             return light.filter(node => (
               node instanceof Element ? node.getAttribute('slot') ?? '' : ''
             ) === name);
           }));
+        });
+        originalSlots.forEach((slot) => {
+          cloneOf.get(slot)!.replaceWith(...assignedClone(slot));
         });
       }
     }
